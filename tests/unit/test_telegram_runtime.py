@@ -102,3 +102,36 @@ def test_telegram_runtime_handles_start_command(tmp_path):
 
     assert handled is True
     assert "NetCoreX ModelSwitch está no ar" in runtime.client.sent[0]["text"]
+
+
+def test_telegram_runtime_handles_usage_command(tmp_path):
+    telemetry_log = tmp_path / "telemetry.log"
+    telemetry_log.write_text(
+        '{"event": {"provider": "ollama", "model": "qwen2.5:14b", "input_tokens": 10, "output_tokens": 20, "estimated_cost": 0.0}}\n',
+        encoding="utf-8",
+    )
+    runtime = TelegramRuntime(
+        settings=Settings(
+            telegram_bot_token="token",
+            telemetry_log_file=str(telemetry_log),
+            telegram_offset_file=str(tmp_path / "offset.txt"),
+        )
+    )
+    runtime.client = FakeTelegramClient()
+    runtime.runner = FakeRunner()
+
+    handled = runtime.handle_update(
+        {
+            "update_id": 3,
+            "message": {
+                "message_id": 12,
+                "text": "/usage",
+                "chat": {"id": 1234},
+                "from": {"id": 999},
+            },
+        }
+    )
+
+    assert handled is True
+    assert "NetCoreX Usage Summary" in runtime.client.sent[0]["text"]
+    assert "qwen2.5:14b" in runtime.client.sent[0]["text"]

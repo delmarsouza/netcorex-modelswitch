@@ -6,6 +6,7 @@ from netcorex_modelswitch.channels.telegram.adapter import TelegramAdapter
 from netcorex_modelswitch.channels.telegram.client import TelegramClient
 from netcorex_modelswitch.config.settings import Settings
 from netcorex_modelswitch.execution.runner import ExecutionRunner
+from netcorex_modelswitch.reporting.usage import UsageReportService
 from netcorex_modelswitch.telemetry.logger import TelemetryLogger
 
 
@@ -18,6 +19,7 @@ class TelegramRuntime:
         self.client = TelegramClient(self.settings.telegram_bot_token)
         self.runner = ExecutionRunner(self.settings)
         self.telemetry = TelemetryLogger(self.settings.telemetry_log_file)
+        self.usage = UsageReportService(self.settings.telemetry_log_file)
 
     def handle_update(self, update: dict) -> bool:
         message = self.adapter.from_update(update)
@@ -81,8 +83,44 @@ class TelegramRuntime:
         if command == "/start":
             return "NetCoreX ModelSwitch está no ar. Me manda uma mensagem e eu roteio pelo fluxo do piloto Telegram-first."
         if command == "/help":
-            return "Comandos disponíveis: /start, /help. Também podes me mandar uma mensagem normal para testar o roteamento."
+            return "Comandos disponíveis: /start, /help, /usage. Também podes me mandar uma mensagem normal para testar o roteamento."
+        if command == "/usage":
+            return self._format_usage_summary()
         return None
+
+    def _format_usage_summary(self) -> str:
+        summary = self.usage.summarize()
+        totals = summary["totals"]
+        lines = [
+            "NetCoreX Usage Summary",
+            "",
+            f"Requests: {totals['requests']}",
+            f"Input tokens: {totals['input_tokens']}",
+            f"Output tokens: {totals['output_tokens']}",
+            f"Estimated cost: {totals['estimated_cost']}",
+            "",
+            "Providers:",
+        ]
+        providers = summary["providers"]
+        if not providers:
+            lines.append("- no telemetry events found")
+            return "\n".join(lines)
+
+        for provider, provider_data in providers.items():
+            lines.append(
+                f"- {provider}: requests={provider_data['requests']}, "
+                f"input_tokens={provider_data['input_tokens']}, "
+                f"output_tokens={provider_data['output_tokens']}, "
+                f"estimated_cost={provider_data['estimated_cost']}"
+            )
+            for model, model_data in provider_data["models"].items():
+                lines.append(
+                    f"  - {model}: requests={model_data['requests']}, "
+                    f"input_tokens={model_data['input_tokens']}, "
+                    f"output_tokens={model_data['output_tokens']}, "
+                    f"estimated_cost={model_data['estimated_cost']}"
+                )
+        return "\n".join(lines)
 
     def _format_reply(self, provider: str, reason: str, content: str) -> str:
         if self.settings.telegram_debug_replies:

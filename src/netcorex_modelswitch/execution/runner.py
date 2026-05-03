@@ -2,6 +2,7 @@ from netcorex_modelswitch.config.settings import Settings
 from netcorex_modelswitch.contracts.models import ChannelMessage, ExecutionPlan, ModelExecutionResult
 from netcorex_modelswitch.orchestrator.planner import ExecutionPlanner
 from netcorex_modelswitch.providers.ollama import OllamaProvider
+from netcorex_modelswitch.providers.openai_provider import OpenAIProvider
 from netcorex_modelswitch.telemetry.events import TokenLedgerEvent
 
 
@@ -10,6 +11,10 @@ class ExecutionRunner:
         self.settings = settings or Settings()
         self.planner = ExecutionPlanner()
         self.ollama = OllamaProvider(base_url=self.settings.ollama_base_url)
+        self.openai = OpenAIProvider(
+            api_key=self.settings.openai_api_key,
+            base_url=self.settings.openai_base_url,
+        ) if self.settings.openai_api_key else None
 
     def build_prompt(self, message: ChannelMessage, plan: ExecutionPlan) -> str:
         specialists = ", ".join(item.specialist for item in plan.specialists) or "none"
@@ -27,15 +32,24 @@ class ExecutionRunner:
 
     def execute_message(self, message: ChannelMessage) -> tuple[ExecutionPlan, ModelExecutionResult, TokenLedgerEvent]:
         plan = self.planner.plan(message)
-        model = plan.routing.model
+        prompt = self.build_prompt(message, plan)
+        fallback_triggered = False
+
         if plan.routing.provider == "local":
-            result = self.ollama.execute(self.build_prompt(message, plan), model=self.settings.ollama_default_model)
+            result = self.ollama.execute(prompt, model=self.settings.ollama_default_model)
+        elif plan.routing.provider in {"chatgpt", "openai"}:
+            if self.openai is not None:
+                result = self.openai.execute(prompt, model=self.settings.openai_default_model)
+            else:
+                fallback_triggered = True
+                result = self.ollama.execute(prompt, model=self.settings.ollama_default_model)
         else:
-            result = ModelExecutionResult(
-                content="Premium provider execution not implemented yet.",
-                provider=plan.routing.provider,
-                model=model,
-            )
+            if self.openai is not None:
+                fallback_triggered = True
+                result = self.openai.execute(prompt, model=self.settings.openai_default_model)
+            else:
+                fallback_triggered = True
+                result = self.ollama.execute(prompt, model=self.settings.ollama_default_model)
 
         event = TokenLedgerEvent(
             provider=result.provider,
@@ -45,6 +59,6 @@ class ExecutionRunner:
             output_tokens=result.output_tokens,
             estimated_cost=result.estimated_cost,
             latency_ms=result.latency_ms,
-            fallback_triggered=False,
+            fallback_triggered=fallback_triggered,
         )
         return plan, result, event

@@ -1,0 +1,58 @@
+from netcorex_modelswitch.channels.telegram.runtime import TelegramRuntime
+from netcorex_modelswitch.config.settings import Settings
+from netcorex_modelswitch.contracts.models import ModelExecutionResult
+
+
+class FakeTelegramClient:
+    def __init__(self):
+        self.sent = []
+
+    def get_updates(self, offset=None, timeout=30):
+        return []
+
+    def send_message(self, chat_id: str, text: str):
+        self.sent.append({"chat_id": chat_id, "text": text})
+        return {"ok": True}
+
+
+class FakeRunner:
+    def execute_message(self, message):
+        from netcorex_modelswitch.contracts.models import (
+            Complexity,
+            ExecutionPlan,
+            IntentAssessment,
+            RiskLevel,
+            RoutingDecision,
+        )
+
+        plan = ExecutionPlan(
+            coordinator="coordinator",
+            specialists=[],
+            routing=RoutingDecision(provider="local", model="ollama-local-default", reason="test_reason"),
+            assessment=IntentAssessment(domain="general", complexity=Complexity.LOW, risk=RiskLevel.LOW),
+        )
+        result = ModelExecutionResult(content="Resposta teste", provider="ollama", model="qwen2.5:14b")
+        return plan, result
+
+
+def test_telegram_runtime_handles_update_and_sends_message():
+    runtime = TelegramRuntime(settings=Settings(telegram_bot_token="token"))
+    runtime.client = FakeTelegramClient()
+    runtime.runner = FakeRunner()
+
+    handled = runtime.handle_update(
+        {
+            "update_id": 1,
+            "message": {
+                "message_id": 10,
+                "text": "Oi",
+                "chat": {"id": 1234},
+                "from": {"id": 999},
+            },
+        }
+    )
+
+    assert handled is True
+    assert runtime.client.sent
+    assert runtime.client.sent[0]["chat_id"] == "1234"
+    assert "Resposta teste" in runtime.client.sent[0]["text"]

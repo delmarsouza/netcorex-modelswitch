@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "netcorex-modelswitch"
+version = "0.1.0"
+description = "Telegram-first hybrid multi-bot orchestration and model routing"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Delmar Souza" }
+]
+dependencies = []
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

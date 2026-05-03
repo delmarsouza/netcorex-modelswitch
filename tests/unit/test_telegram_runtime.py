@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from netcorex_modelswitch.channels.telegram.runtime import TelegramRuntime
 from netcorex_modelswitch.config.settings import Settings
 from netcorex_modelswitch.contracts.models import ModelExecutionResult
@@ -24,6 +26,7 @@ class FakeRunner:
             RiskLevel,
             RoutingDecision,
         )
+        from netcorex_modelswitch.telemetry.events import TokenLedgerEvent
 
         plan = ExecutionPlan(
             coordinator="coordinator",
@@ -32,11 +35,26 @@ class FakeRunner:
             assessment=IntentAssessment(domain="general", complexity=Complexity.LOW, risk=RiskLevel.LOW),
         )
         result = ModelExecutionResult(content="Resposta teste", provider="ollama", model="qwen2.5:14b")
-        return plan, result
+        event = TokenLedgerEvent(
+            provider="ollama",
+            model="qwen2.5:14b",
+            route_reason="test_reason",
+            input_tokens=1,
+            output_tokens=2,
+            estimated_cost=0.0,
+            latency_ms=3,
+        )
+        return plan, result, event
 
 
-def test_telegram_runtime_handles_update_and_sends_message():
-    runtime = TelegramRuntime(settings=Settings(telegram_bot_token="token"))
+def test_telegram_runtime_handles_update_and_sends_message(tmp_path):
+    runtime = TelegramRuntime(
+        settings=Settings(
+            telegram_bot_token="token",
+            telemetry_log_file=str(tmp_path / "telemetry.log"),
+            telegram_offset_file=str(tmp_path / "offset.txt"),
+        )
+    )
     runtime.client = FakeTelegramClient()
     runtime.runner = FakeRunner()
 
@@ -56,3 +74,31 @@ def test_telegram_runtime_handles_update_and_sends_message():
     assert runtime.client.sent
     assert runtime.client.sent[0]["chat_id"] == "1234"
     assert "Resposta teste" in runtime.client.sent[0]["text"]
+    assert Path(tmp_path / "telemetry.log").exists()
+
+
+def test_telegram_runtime_handles_start_command(tmp_path):
+    runtime = TelegramRuntime(
+        settings=Settings(
+            telegram_bot_token="token",
+            telemetry_log_file=str(tmp_path / "telemetry.log"),
+            telegram_offset_file=str(tmp_path / "offset.txt"),
+        )
+    )
+    runtime.client = FakeTelegramClient()
+    runtime.runner = FakeRunner()
+
+    handled = runtime.handle_update(
+        {
+            "update_id": 2,
+            "message": {
+                "message_id": 11,
+                "text": "/start",
+                "chat": {"id": 1234},
+                "from": {"id": 999},
+            },
+        }
+    )
+
+    assert handled is True
+    assert "NetCoreX ModelSwitch está no ar" in runtime.client.sent[0]["text"]
